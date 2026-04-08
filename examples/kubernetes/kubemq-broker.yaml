@@ -1,0 +1,155 @@
+# kubemq-broker.yaml
+# ------------------------------------------------------------------
+# KubeMQ broker deployment for use with kubemq-rayserve integration.
+#
+# Deploys a KubeMQ StatefulSet with a headless Service exposing:
+#   - 50000  gRPC (SDK clients)
+#   - 8080   REST gateway
+#   - 9090   API / dashboard
+#
+# Usage:
+#   kubectl apply -f kubemq-broker.yaml
+#
+# Prerequisites:
+#   - A valid KubeMQ license key (set KUBEMQ_TOKEN below)
+#   - Kubernetes 1.22+ cluster
+#
+# NOTE: This is a REFERENCE configuration. Adjust resource limits,
+#       storage, and replicas for your production environment.
+# ------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: default  # Change to your target namespace
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubemq-cluster
+  namespace: default  # Change to match namespace above
+  labels:
+    app: kubemq
+spec:
+  clusterIP: None  # Headless service for StatefulSet
+  ports:
+    - name: grpc
+      port: 50000
+      targetPort: 50000
+      protocol: TCP
+    - name: rest
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    - name: api
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  selector:
+    app: kubemq
+---
+# Additional ClusterIP service for stable internal DNS access.
+# Clients connect to kubemq-cluster-service:50000 from within the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubemq-cluster-service
+  namespace: default  # Change to match namespace above
+  labels:
+    app: kubemq
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: 50000
+      targetPort: 50000
+      protocol: TCP
+    - name: rest
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    - name: api
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  selector:
+    app: kubemq
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kubemq-cluster
+  namespace: default  # Change to match namespace above
+  labels:
+    app: kubemq
+spec:
+  serviceName: kubemq-cluster
+  replicas: 1  # Increase for HA; 3 recommended for production
+  selector:
+    matchLabels:
+      app: kubemq
+  template:
+    metadata:
+      labels:
+        app: kubemq
+    spec:
+      containers:
+        - name: kubemq
+          image: kubemq/kubemq:latest
+          ports:
+            - containerPort: 50000
+              name: grpc
+            - containerPort: 8080
+              name: rest
+            - containerPort: 9090
+              name: api
+          env:
+            # REQUIRED: Replace with your KubeMQ license key
+            - name: KUBEMQ_TOKEN
+              value: "YOUR-KUBEMQ-LICENSE-KEY"
+            # Cluster name — must match the StatefulSet name for
+            # automatic peer discovery in multi-replica setups.
+            - name: CLUSTER_NAME
+              value: "kubemq-cluster"
+            # Cluster routes for multi-replica discovery (uncomment for HA)
+            # - name: CLUSTER_ROUTES
+            #   value: "kubemq-cluster-0.kubemq-cluster:5228,kubemq-cluster-1.kubemq-cluster:5228,kubemq-cluster-2.kubemq-cluster:5228"
+            # gRPC listen port
+            - name: GRPC_PORT
+              value: "50000"
+            # REST gateway port
+            - name: REST_PORT
+              value: "8080"
+            # API / dashboard port
+            - name: API_PORT
+              value: "9090"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          volumeMounts:
+            - name: kubemq-data
+              mountPath: /store
+  volumeClaimTemplates:
+    - metadata:
+        name: kubemq-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi  # Adjust for production workloads
+        # storageClassName: "standard"  # Uncomment and set your storage class

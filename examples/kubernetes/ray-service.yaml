@@ -1,0 +1,151 @@
+# ray-service.yaml
+# ------------------------------------------------------------------
+# RayService CRD for deploying the kubemq-rayserve adapter as a
+# managed Ray Serve application.
+#
+# RayService manages the full lifecycle: cluster provisioning,
+# application deployment, health monitoring, and zero-downtime
+# upgrades.
+#
+# Usage:
+#   kubectl apply -f ray-service.yaml
+#
+# Prerequisites:
+#   - KubeRay operator v1.1+ installed
+#   - KubeMQ broker deployed (see kubemq-broker.yaml)
+#   - Kubernetes 1.22+ cluster
+#
+# NOTE: This is a REFERENCE configuration. Adjust the serveConfigV2
+#       section to match your application's deployment graph.
+# ------------------------------------------------------------------
+apiVersion: ray.io/v1
+kind: RayService
+metadata:
+  name: kubemq-rayserve-service
+  namespace: default  # Change to your target namespace
+  labels:
+    app: kubemq-rayserve
+spec:
+  # Time to wait for Serve apps to become healthy before rollback
+  serviceUnhealthySecondThreshold: 300
+  # Time to wait for the Ray cluster to become healthy
+  deploymentUnhealthySecondThreshold: 120
+
+  # ----------------------------------------------------------------
+  # Serve configuration — defines the deployment graph.
+  # This is a YAML-serialised Ray Serve config (serve build output).
+  # ----------------------------------------------------------------
+  serveConfigV2: |
+    applications:
+      - name: kubemq-inference
+        route_prefix: /
+        import_path: your_app.deployment:app
+        runtime_env:
+          pip:
+            - kubemq-rayserve>=1.0.0
+            - kubemq>=3.0.0
+          env_vars:
+            KUBEMQ_ADDRESS: "kubemq-cluster-service.default.svc.cluster.local:50000"
+            KUBEMQ_AUTH_TOKEN: ""
+        deployments:
+          - name: KubeMQTaskConsumer
+            num_replicas: 2
+            max_ongoing_requests: 100
+            # Custom autoscaling using kubemq queue depth policy
+            autoscaling_config:
+              min_replicas: 1
+              max_replicas: 10
+              target_ongoing_requests: 5
+              upscale_delay_s: 10
+              downscale_delay_s: 60
+              # To use the KubeMQ queue-depth policy instead of
+              # the default Ray autoscaler, set:
+              #   autoscaling_policy:
+              #     import_path: kubemq_rayserve.autoscaling:kubemq_queue_depth_policy
+              #     config:
+              #       kubemq_address: "kubemq-cluster-service.default.svc.cluster.local:50000"
+              #       queue_name: "rayserve-tasks"
+              #       tasks_per_replica: 5
+            ray_actor_options:
+              num_cpus: 0.5
+              memory: 536870912  # 512 MiB
+
+  # ----------------------------------------------------------------
+  # Underlying RayCluster spec — same structure as ray-cluster.yaml.
+  # RayService creates and manages this cluster automatically.
+  # ----------------------------------------------------------------
+  rayClusterConfig:
+    rayVersion: "2.43.0"
+    headGroupSpec:
+      rayStartParams:
+        dashboard-host: "0.0.0.0"
+      template:
+        metadata:
+          labels:
+            app: kubemq-rayserve
+            component: head
+        spec:
+          containers:
+            - name: ray-head
+              image: rayproject/ray:2.43.0-py311
+              ports:
+                - containerPort: 6379
+                  name: gcs-server
+                - containerPort: 8265
+                  name: dashboard
+                - containerPort: 10001
+                  name: client
+                - containerPort: 8000
+                  name: serve
+              resources:
+                requests:
+                  cpu: "1"
+                  memory: "2Gi"
+                limits:
+                  cpu: "2"
+                  memory: "4Gi"
+              env:
+                - name: KUBEMQ_ADDRESS
+                  value: "kubemq-cluster-service.default.svc.cluster.local:50000"
+              volumeMounts:
+                - name: ray-logs
+                  mountPath: /tmp/ray
+          volumes:
+            - name: ray-logs
+              emptyDir: {}
+
+    workerGroupSpecs:
+      - groupName: default-worker
+        replicas: 2
+        minReplicas: 1
+        maxReplicas: 10
+        rayStartParams: {}
+        template:
+          metadata:
+            labels:
+              app: kubemq-rayserve
+              component: worker
+          spec:
+            containers:
+              - name: ray-worker
+                image: rayproject/ray:2.43.0-py311
+                resources:
+                  requests:
+                    cpu: "500m"
+                    memory: "1Gi"
+                  limits:
+                    cpu: "2"
+                    memory: "4Gi"
+                env:
+                  - name: KUBEMQ_ADDRESS
+                    value: "kubemq-cluster-service.default.svc.cluster.local:50000"
+                lifecycle:
+                  preStop:
+                    exec:
+                      command: ["/bin/sh", "-c", "ray stop"]
+                volumeMounts:
+                  - name: ray-logs
+                    mountPath: /tmp/ray
+            volumes:
+              - name: ray-logs
+                emptyDir: {}

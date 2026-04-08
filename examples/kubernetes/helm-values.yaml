@@ -1,0 +1,249 @@
+# helm-values.yaml
+# ------------------------------------------------------------------
+# Helm values.yaml template for production deployment of the
+# kubemq-rayserve integration stack.
+#
+# This file is intended as a starting point for a Helm chart that
+# deploys KubeMQ, Ray Serve, the adapter, and KEDA autoscaling
+# together. Customize each section for your environment.
+#
+# Usage:
+#   helm install kubemq-rayserve ./chart -f helm-values.yaml
+#
+# NOTE: This is a REFERENCE configuration. Create your own Helm
+#       chart or use it with an umbrella chart that includes
+#       KubeMQ, KubeRay, and KEDA sub-charts.
+# ------------------------------------------------------------------
+
+# ================================================================
+# Global settings
+# ================================================================
+global:
+  namespace: default              # Target namespace for all resources
+  imagePullPolicy: IfNotPresent   # IfNotPresent | Always | Never
+  # imagePullSecrets:
+  #   - name: my-registry-secret
+
+# ================================================================
+# KubeMQ broker configuration
+# ================================================================
+kubemq:
+  enabled: true
+  image:
+    repository: kubemq/kubemq
+    tag: latest
+  replicas: 1                     # 3 recommended for production HA
+  licenseKey: ""                  # REQUIRED: your KubeMQ license key
+
+  service:
+    type: ClusterIP               # ClusterIP | LoadBalancer | NodePort
+    ports:
+      grpc: 50000
+      rest: 8080
+      api: 9090
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+  persistence:
+    enabled: true
+    storageClass: ""              # Leave empty for default storage class
+    size: 5Gi
+    accessMode: ReadWriteOnce
+
+  # Environment variables passed to the KubeMQ container
+  extraEnv: {}
+    # CLUSTER_ROUTES: "kubemq-cluster-0.kubemq-cluster:5228"
+
+# ================================================================
+# Ray cluster configuration (via KubeRay operator)
+# ================================================================
+ray:
+  enabled: true
+  version: "2.43.0"
+
+  image:
+    repository: rayproject/ray
+    tag: "2.43.0-py311"           # Match your Python version
+
+  head:
+    replicas: 1                   # Always 1 for Ray head
+    resources:
+      requests:
+        cpu: "1"
+        memory: "2Gi"
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+    # Extra environment variables for head node
+    extraEnv: {}
+
+  workers:
+    default:
+      replicas: 2
+      minReplicas: 1
+      maxReplicas: 10
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "1Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+    # GPU worker group (disabled by default)
+    gpu:
+      enabled: false
+      replicas: 0
+      minReplicas: 0
+      maxReplicas: 4
+      resources:
+        requests:
+          cpu: "1"
+          memory: "4Gi"
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+          nvidia.com/gpu: "1"
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+
+  # Ray Serve application configuration
+  serve:
+    importPath: "your_app.deployment:app"   # Replace with your app
+    numReplicas: 2
+    maxOngoingRequests: 100
+    autoscaling:
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 10
+      targetOngoingRequests: 5
+      upscaleDelayS: 10
+      downscaleDelayS: 60
+
+# ================================================================
+# kubemq-rayserve adapter configuration
+# ================================================================
+adapter:
+  # KubeMQ connection
+  address: "kubemq-cluster-service:50000"  # In-cluster service DNS
+  clientId: ""                              # Auto-generated if empty
+
+  # Authentication (references Secret)
+  auth:
+    enabled: false
+    secretName: kubemq-adapter-auth         # Must exist if enabled
+    authTokenKey: auth-token
+
+  # TLS configuration
+  tls:
+    enabled: false
+    secretName: kubemq-adapter-auth         # Secret with cert data
+    certFile: /etc/kubemq/tls/client.crt
+    keyFile: /etc/kubemq/tls/client.key
+    caFile: /etc/kubemq/tls/ca.crt
+
+  # Queue / channel settings
+  taskQueue: "rayserve-tasks"
+  resultChannelPrefix: "rayserve-result-"
+
+  # Timeout settings (seconds)
+  resultExpirySeconds: 3600                 # 1 hour default
+  consumerPollTimeoutSeconds: 1
+  syncInferenceTimeout: 30
+  visibilityTimeout: 120                    # Reserved for future use
+
+  # Message size limits (bytes)
+  maxSendSize: 4194304                      # 4 MiB
+  maxReceiveSize: 4194304                   # 4 MiB
+
+  # Runtime environment — pip packages installed on workers
+  runtimeEnv:
+    pip:
+      - "kubemq-rayserve>=1.0.0"
+      - "kubemq>=3.0.0"
+
+# ================================================================
+# KEDA autoscaling configuration
+# ================================================================
+keda:
+  enabled: false                            # Enable KEDA-based scaling
+  pollingInterval: 15                       # Seconds between scaler checks
+  cooldownPeriod: 60                        # Seconds before scale-down
+  minReplicaCount: 1
+  maxReplicaCount: 20
+
+  # Scaling trigger — KubeMQ queue depth
+  trigger:
+    queueName: "rayserve-tasks"             # Must match adapter.taskQueue
+    threshold: "5"                          # Messages per replica
+    scalerAddress: ""                       # Auto-derived from kubemq.service if empty
+
+  # HPA behavior tuning
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      maxPodsPerPeriod: 4
+      periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      maxPercentPerPeriod: 25
+      periodSeconds: 60
+
+  # Use TriggerAuthentication for secure credential passing
+  triggerAuth:
+    enabled: false
+    secretName: kubemq-adapter-auth
+    authTokenKey: auth-token
+
+# ================================================================
+# Resource defaults (applied when per-component values are absent)
+# ================================================================
+resources:
+  defaults:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+# ================================================================
+# Monitoring and observability
+# ================================================================
+monitoring:
+  # Prometheus ServiceMonitor (requires prometheus-operator)
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+  # Grafana dashboard ConfigMap
+  grafanaDashboard:
+    enabled: false
+
+# ================================================================
+# Pod disruption budgets
+# ================================================================
+podDisruptionBudget:
+  kubemq:
+    enabled: false
+    minAvailable: 1
+  rayWorker:
+    enabled: false
+    minAvailable: 1
+
+# ================================================================
+# Node affinity and tolerations (global)
+# ================================================================
+nodeSelector: {}
+tolerations: []
+affinity: {}
