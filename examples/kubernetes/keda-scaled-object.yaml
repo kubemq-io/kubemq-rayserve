@@ -1,0 +1,111 @@
+# keda-scaled-object.yaml
+# ------------------------------------------------------------------
+# KEDA ScaledObject for auto-scaling Ray Serve workers based on
+# KubeMQ queue depth.
+#
+# KEDA polls the KubeMQ external scaler and adjusts the replica
+# count of the target Deployment (or Ray worker group) based on
+# the number of waiting messages in the task queue.
+#
+# Usage:
+#   kubectl apply -f keda-scaled-object.yaml
+#
+# Prerequisites:
+#   - KEDA v2.x installed (https://keda.sh/docs/deploy/)
+#   - KubeMQ external scaler deployed (kubemq/kubemq-targets
+#     or a custom gRPC scaler endpoint)
+#   - KubeMQ broker deployed (see kubemq-broker.yaml)
+#   - Target Deployment / StatefulSet exists
+#
+# NOTE: This is a REFERENCE configuration. Adjust the scaleTargetRef,
+#       thresholds, and scaler metadata for your environment.
+# ------------------------------------------------------------------
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: kubemq-rayserve-scaledobject
+  namespace: default  # Change to your target namespace
+  labels:
+    app: kubemq-rayserve
+    component: autoscaling
+spec:
+  # ----------------------------------------------------------------
+  # Target — the Deployment or StatefulSet to scale.
+  # Update name to match your Ray worker Deployment.
+  # ----------------------------------------------------------------
+  scaleTargetRef:
+    name: ray-worker-deployment  # Replace with your actual Deployment name
+    # kind: Deployment           # Default is Deployment; set StatefulSet if needed
+
+  # ----------------------------------------------------------------
+  # Scaling bounds
+  # ----------------------------------------------------------------
+  minReplicaCount: 1    # Minimum replicas (set to 0 for scale-to-zero)
+  maxReplicaCount: 20   # Maximum replicas
+  pollingInterval: 15   # How often KEDA checks the scaler (seconds)
+  cooldownPeriod: 60    # Seconds to wait before scaling down after last trigger
+
+  # ----------------------------------------------------------------
+  # Advanced scaling behavior (optional — Kubernetes HPA v2 spec)
+  # ----------------------------------------------------------------
+  advanced:
+    restoreToOriginalReplicaCount: false  # Keep scaled count on ScaledObject delete
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0   # Scale up immediately
+          policies:
+            - type: Pods
+              value: 4                    # Add up to 4 pods per 15s window
+              periodSeconds: 15
+        scaleDown:
+          stabilizationWindowSeconds: 120  # Wait 2 min before scaling down
+          policies:
+            - type: Percent
+              value: 25                    # Remove at most 25% per period
+              periodSeconds: 60
+
+  # ----------------------------------------------------------------
+  # Triggers — external scaler for KubeMQ queue depth
+  # ----------------------------------------------------------------
+  triggers:
+    - type: external
+      metadata:
+        # KubeMQ external scaler gRPC endpoint.
+        # If using the KubeMQ KEDA connector, point to its service.
+        scalerAddress: "kubemq-cluster-service.default.svc.cluster.local:50000"
+
+        # Queue channel name to monitor (must match KUBEMQ_TASK_QUEUE
+        # in configmap-adapter.yaml).
+        queueName: "rayserve-tasks"
+
+        # Scale threshold — number of waiting messages per replica.
+        # KEDA computes: desiredReplicas = queueDepth / value
+        value: "5"
+
+        # Connection type for the KubeMQ scaler
+        # Options: queues (for queue-based scaling)
+        connectionType: "queues"
+
+        # Optional: authentication token for KubeMQ broker
+        # Prefer using TriggerAuthentication for production (see below).
+        # authToken: ""
+
+---
+# ----------------------------------------------------------------
+# TriggerAuthentication — securely pass credentials to the scaler
+# without embedding them in the ScaledObject metadata.
+# ----------------------------------------------------------------
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: kubemq-trigger-auth
+  namespace: default  # Change to your target namespace
+  labels:
+    app: kubemq-rayserve
+    component: autoscaling
+spec:
+  secretTargetRef:
+    - parameter: authToken
+      name: kubemq-adapter-auth     # References secret-auth.yaml
+      key: auth-token

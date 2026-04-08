@@ -1,0 +1,93 @@
+# configmap-adapter.yaml
+# ------------------------------------------------------------------
+# ConfigMap holding the kubemq-rayserve adapter configuration.
+#
+# These values map directly to KubeMQAdapterConfig fields. Mount
+# as environment variables or as a file and load with Pydantic.
+#
+# Usage:
+#   kubectl apply -f configmap-adapter.yaml
+#
+# To use in a Deployment / RayService:
+#   envFrom:
+#     - configMapRef:
+#         name: kubemq-adapter-config
+#
+# NOTE: This is a REFERENCE configuration. Adjust values for your
+#       production environment. Sensitive values (auth_token, TLS
+#       keys) belong in a Secret — see secret-auth.yaml.
+# ------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubemq-adapter-config
+  namespace: default  # Change to your target namespace
+  labels:
+    app: kubemq-rayserve
+    component: adapter-config
+data:
+  # ----------------------------------------------------------------
+  # Connection settings
+  # ----------------------------------------------------------------
+
+  # KubeMQ broker gRPC address.
+  # In-cluster: use the Service DNS name from kubemq-broker.yaml.
+  KUBEMQ_ADDRESS: "kubemq-cluster-service.default.svc.cluster.local:50000"
+
+  # Client identifier — leave empty for auto-generated UUID suffix.
+  KUBEMQ_CLIENT_ID: ""
+
+  # ----------------------------------------------------------------
+  # Queue / channel settings
+  # ----------------------------------------------------------------
+
+  # Queue channel name for task submission.
+  # The adapter consumer polls this queue for incoming tasks.
+  KUBEMQ_TASK_QUEUE: "rayserve-tasks"
+
+  # Prefix for result storage channels.
+  # Each task result is stored at <prefix><task_id>.
+  KUBEMQ_RESULT_CHANNEL_PREFIX: "rayserve-result-"
+
+  # ----------------------------------------------------------------
+  # Timeout settings (all values in seconds)
+  # ----------------------------------------------------------------
+
+  # How long results are retained before automatic expiry.
+  # Range: 0 (no expiry) to 86400 (24 hours). Default: 3600 (1 hour).
+  KUBEMQ_RESULT_EXPIRY_SECONDS: "3600"
+
+  # Queue poll timeout — how long the consumer waits for new
+  # messages before retrying. Lower values = faster reaction,
+  # higher values = fewer empty polls.
+  KUBEMQ_CONSUMER_POLL_TIMEOUT_SECONDS: "1"
+
+  # Default timeout for synchronous Query-based inference.
+  KUBEMQ_SYNC_INFERENCE_TIMEOUT: "30"
+
+  # Visibility timeout — reserved for future SDK support.
+  KUBEMQ_VISIBILITY_TIMEOUT: "120"
+
+  # ----------------------------------------------------------------
+  # Message size limits (bytes)
+  # ----------------------------------------------------------------
+
+  # Maximum send size (default 4 MiB).
+  KUBEMQ_MAX_SEND_SIZE: "4194304"
+
+  # Maximum receive size (default 4 MiB).
+  KUBEMQ_MAX_RECEIVE_SIZE: "4194304"
+
+  # ----------------------------------------------------------------
+  # TLS settings (non-sensitive — paths only)
+  # Actual certificate content should be mounted via Secrets.
+  # ----------------------------------------------------------------
+
+  # Set to "true" to enable TLS connections to the broker.
+  KUBEMQ_TLS: "false"
+
+  # Paths to TLS certificate files mounted from Secrets.
+  # These paths should match volumeMounts in your Pod spec.
+  KUBEMQ_TLS_CERT_FILE: "/etc/kubemq/tls/client.crt"
+  KUBEMQ_TLS_KEY_FILE: "/etc/kubemq/tls/client.key"
+  KUBEMQ_TLS_CA_FILE: "/etc/kubemq/tls/ca.crt"

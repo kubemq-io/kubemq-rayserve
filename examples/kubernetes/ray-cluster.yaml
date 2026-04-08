@@ -1,0 +1,141 @@
+# ray-cluster.yaml
+# ------------------------------------------------------------------
+# RayCluster CRD for deploying a Ray cluster alongside KubeMQ.
+#
+# This manifest creates a Ray head node and worker group with
+# kubemq-rayserve pre-installed via pip in the runtime environment.
+#
+# Usage:
+#   kubectl apply -f ray-cluster.yaml
+#
+# Prerequisites:
+#   - KubeRay operator installed (https://docs.ray.io/en/latest/cluster/kubernetes.html)
+#   - KubeMQ broker deployed (see kubemq-broker.yaml)
+#   - Kubernetes 1.22+ cluster
+#
+# NOTE: This is a REFERENCE configuration. Adjust replicas, resources,
+#       and runtime_env for your production environment.
+# ------------------------------------------------------------------
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: kubemq-rayserve-cluster
+  namespace: default  # Change to your target namespace
+  labels:
+    app: kubemq-rayserve
+spec:
+  rayVersion: "2.43.0"  # Update to your Ray version
+
+  # ----------------------------------------------------------------
+  # Head node — runs Ray GCS, dashboard, and Serve controller.
+  # ----------------------------------------------------------------
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: "0.0.0.0"
+      # Uncomment for production: limit object store memory
+      # object-store-memory: "1000000000"
+    template:
+      metadata:
+        labels:
+          app: kubemq-rayserve
+          component: head
+      spec:
+        containers:
+          - name: ray-head
+            image: rayproject/ray:2.43.0-py311  # Match your Ray + Python version
+            ports:
+              - containerPort: 6379
+                name: gcs-server
+              - containerPort: 8265
+                name: dashboard
+              - containerPort: 10001
+                name: client
+              - containerPort: 8000
+                name: serve
+            resources:
+              requests:
+                cpu: "1"
+                memory: "2Gi"
+              limits:
+                cpu: "2"
+                memory: "4Gi"
+            env:
+              # KubeMQ broker address — matches kubemq-broker.yaml Service
+              - name: KUBEMQ_ADDRESS
+                value: "kubemq-cluster-service.default.svc.cluster.local:50000"
+            volumeMounts:
+              - name: ray-logs
+                mountPath: /tmp/ray
+        volumes:
+          - name: ray-logs
+            emptyDir: {}
+
+  # ----------------------------------------------------------------
+  # Worker group — runs Ray Serve replicas with kubemq-rayserve.
+  # ----------------------------------------------------------------
+  workerGroupSpecs:
+    - groupName: default-worker
+      replicas: 2           # Adjust based on workload
+      minReplicas: 1
+      maxReplicas: 10       # Upper bound for autoscaling
+      rayStartParams: {}
+      template:
+        metadata:
+          labels:
+            app: kubemq-rayserve
+            component: worker
+        spec:
+          containers:
+            - name: ray-worker
+              image: rayproject/ray:2.43.0-py311  # Match head node image
+              resources:
+                requests:
+                  cpu: "500m"
+                  memory: "1Gi"
+                limits:
+                  cpu: "2"
+                  memory: "4Gi"
+              env:
+                # KubeMQ broker address for worker-side connections
+                - name: KUBEMQ_ADDRESS
+                  value: "kubemq-cluster-service.default.svc.cluster.local:50000"
+              lifecycle:
+                preStop:
+                  exec:
+                    command: ["/bin/sh", "-c", "ray stop"]
+              volumeMounts:
+                - name: ray-logs
+                  mountPath: /tmp/ray
+          volumes:
+            - name: ray-logs
+              emptyDir: {}
+
+    # Uncomment for GPU workers (ML inference workloads)
+    # - groupName: gpu-worker
+    #   replicas: 1
+    #   minReplicas: 0
+    #   maxReplicas: 4
+    #   rayStartParams:
+    #     num-gpus: "1"
+    #   template:
+    #     metadata:
+    #       labels:
+    #         app: kubemq-rayserve
+    #         component: gpu-worker
+    #     spec:
+    #       containers:
+    #         - name: ray-worker
+    #           image: rayproject/ray:2.43.0-py311-gpu
+    #           resources:
+    #             requests:
+    #               cpu: "1"
+    #               memory: "4Gi"
+    #               nvidia.com/gpu: "1"
+    #             limits:
+    #               cpu: "4"
+    #               memory: "8Gi"
+    #               nvidia.com/gpu: "1"
+    #       tolerations:
+    #         - key: nvidia.com/gpu
+    #           operator: Exists
+    #           effect: NoSchedule
