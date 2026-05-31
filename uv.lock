@@ -1054,7 +1054,7 @@ wheels = [
 
 [[package]]
 name = "kubemq"
-version = "4.1.2"
+version = "4.1.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "grpcio" },
@@ -1063,9 +1063,9 @@ dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e8/b3/65616bebedbaf50f176a0106e6bd3958e7f19e014f2d66eab7e64e398f4b/kubemq-4.1.2.tar.gz", hash = "sha256:c6ef085334efdbcc4e5c51b62cfbccfd657f6fd4767c8ea38fb2574255c0aff5", size = 320893, upload-time = "2026-04-07T19:37:12.877Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/22/75/888e29acc820091e0d303953c7f7f59d593c8aae96833263111e609f250f/kubemq-4.1.5.tar.gz", hash = "sha256:b991e1ebbe35984e96bb77239f9649c62486fdf6478cb4c9098ea93aec349e89", size = 322465, upload-time = "2026-05-31T15:00:31.523Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/81/c6/b687540d943abe3fe8c14a864de924414954df6086ec4c67ba42d23e06cb/kubemq-4.1.2-py3-none-any.whl", hash = "sha256:a1c4c71cd27eb4e6ce5cdca7d62b96664a4f58ab32e8570ce72872e034870cd8", size = 187108, upload-time = "2026-04-07T19:37:11.452Z" },
+    { url = "https://files.pythonhosted.org/packages/76/48/81bf2eed1b934547a1c3f021dcd2e2711a349bcbc068b1dbb78207289cb1/kubemq-4.1.5-py3-none-any.whl", hash = "sha256:81ec0e9e620603e2cc11447ccf6adc86d665f88f85adadf6d302e39bb8b0fd6e", size = 187192, upload-time = "2026-05-31T15:00:29.864Z" },
 ]
 
 [[package]]
@@ -1099,7 +1099,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "flask", marker = "extra == 'flask'", specifier = ">=3.0" },
-    { name = "kubemq", specifier = ">=4.1.2" },
+    { name = "kubemq", specifier = ">=4.1.5" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "ray", extras = ["serve"], specifier = ">=2.50.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0" },
