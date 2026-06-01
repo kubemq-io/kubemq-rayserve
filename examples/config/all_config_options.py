@@ -50,7 +50,7 @@ def main():
     )
 
     print("KubeMQAdapterConfig fields:")
-    for field_name, field_info in config.model_fields.items():
+    for field_name, field_info in KubeMQAdapterConfig.model_fields.items():
         value = getattr(config, field_name)
         print(f"  {field_name}: {value!r}")
 
