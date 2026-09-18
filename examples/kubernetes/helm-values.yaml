@@ -30,7 +30,7 @@ global:
 kubemq:
   enabled: true
   image:
-    repository: kubemq/kubemq
+    repository: europe-docker.pkg.dev/kubemq/images/kubemq-next
     tag: latest
   replicas: 1                     # 3 recommended for production HA
   licenseKey: ""                  # REQUIRED: your KubeMQ license key
