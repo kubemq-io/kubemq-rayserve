@@ -8,7 +8,7 @@ Comprehensive, runnable examples for the kubemq-rayserve integration. Every exam
 
 1. **KubeMQ broker** running on `localhost:50000`:
    ```bash
-   docker run -d --name kubemq -p 50000:50000 -p 8080:8080 -p 9090:9090 kubemq/kubemq-community:latest
+   docker run -d --name kubemq -p 50000:50000 -p 8080:8080 -p 9090:9090 europe-docker.pkg.dev/kubemq/images/kubemq-next:latest
    ```
 
 2. **Install the integration package**:
